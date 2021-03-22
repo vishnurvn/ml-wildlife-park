@@ -4,7 +4,7 @@ import torch.nn.functional as f
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 
-from model import SimpleYoloModel, yolo_localization_loss
+from object_detection.yolo import SimpleYoloModel, yolo_localization_loss
 from data_loader import YoloDataset
 
 
