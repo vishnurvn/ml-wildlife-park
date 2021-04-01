@@ -1,17 +1,11 @@
-import torch
-import torch.nn as nn
-import torch.optim as optimizer
+import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 
-from torch.utils.tensorboard import SummaryWriter
-import pytorch_lightning as pl
+from object_detection.yolo import CSVDataset, ClassifierBackBone
 
-from object_detection.yolo import YoloBodyDataset, ClassifierBackBone
-
-
-data_set = YoloBodyDataset(
+data_set = CSVDataset(
     r'C:\Users\Vishnu\Documents\model_zoo\data\data.csv',
-    r'C:\Users\Vishnu\Documents\model_zoo\data'
+    r'C:\Users\Vishnu\Documents\model_zoo\data\human_data'
 )
 data_len = len(data_set)
 train_len, val_len = int(0.6 * data_len), int(0.2 * data_len)

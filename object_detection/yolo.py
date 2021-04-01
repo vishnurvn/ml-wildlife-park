@@ -82,9 +82,16 @@ class ClassifierBackBone(pl.LightningModule):
         return loss
 
 
-class YoloBodyDataset(Dataset):
+class CSVDataset(Dataset):
+    """
+    File format. 2 Columns (folder/pic_name, label)
+    Arguments:
+        file_path: folder/pic_name
+        data_path: path to the folder
+
+    """
     def __init__(self, file_path, data_path):
-        super(YoloBodyDataset, self).__init__()
+        super(CSVDataset, self).__init__()
         self.data_path = data_path
         self.data = []
         with open(file_path, 'r') as fp:
@@ -94,8 +101,7 @@ class YoloBodyDataset(Dataset):
 
     def __getitem__(self, item):
         image_path = self.data[item]['file_path']
-        path = os.path.join(self.data_path, image_path)
-        image = Image.open(path)
+        image = Image.open(os.path.join(self.data_path, image_path))
         label = float(self.data[item]['label'])
 
         input_tensor = transforms(image)
