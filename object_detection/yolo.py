@@ -1,15 +1,15 @@
+import csv
 import os
+from collections import Counter
+
+import pytorch_lightning as pl
 import torch
+from PIL import Image
 from torch import nn as nn
 from torch.nn import functional as f
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms as t
-
-from collections import Counter
-from PIL import Image
-
-import csv
-import pytorch_lightning as pl
+from torchmetrics import Accuracy, Precision, Recall, F1
 
 LAMBDA_COORD = 5
 NO_OBJ = 0.5
@@ -57,8 +57,17 @@ class ClassifierBackBone(pl.LightningModule):
             nn.Flatten(),
             nn.Linear(25088, 64),
             nn.Linear(64, 1),
+            nn.Sigmoid()
         )
-        self.criterion = torch.nn.BCEWithLogitsLoss()
+        self.criterion = torch.nn.BCELoss()
+        self.metrics = {
+            'train_accuracy': Accuracy(),
+            'train_precision': Precision(),
+            'train_recall': Recall(),
+            'val_accuracy': Accuracy(),
+            'val_precision': Precision(),
+            'val_recall': Recall(),
+        }
 
     def forward(self, x):
         return self.back_bone(x)
@@ -71,6 +80,11 @@ class ClassifierBackBone(pl.LightningModule):
         inp, label = train_batch
         out = self.back_bone(inp)
         loss = self.criterion(out, label)
+        out = torch.round(out).to(int)
+        label = torch.round(label).to(int)
+        self.metrics['train_accuracy'](out, label)
+        self.metrics['train_precision'](out, label)
+        self.metrics['train_recall'](out, label)
         self.log("train_loss", loss.item())
         return loss
 
@@ -78,8 +92,29 @@ class ClassifierBackBone(pl.LightningModule):
         inp, label = val_batch
         out = self.back_bone(inp)
         loss = self.criterion(out, label)
+        out = torch.round(out).to(int)
+        label = torch.round(label).to(int)
+        self.metrics['val_accuracy'](out, label)
+        self.metrics['val_precision'](out, label)
+        self.metrics['val_recall'](out, label)
         self.log("val_loss", loss.item())
         return loss
+
+    def on_train_epoch_end(self, outputs):
+        acc = self.metrics['train_accuracy'].compute()
+        precision = self.metrics['train_precision'].compute()
+        recall = self.metrics['train_recall'].compute()
+        self.log("train_accuracy", acc)
+        self.log("train_precision", precision)
+        self.log("train_recall", recall)
+
+    def on_validation_epoch_end(self):
+        acc = self.metrics['val_accuracy'].compute()
+        precision = self.metrics['val_precision'].compute()
+        recall = self.metrics['val_recall'].compute()
+        self.log("val_accuracy", acc)
+        self.log("val_precision", precision)
+        self.log("val_recall", recall)
 
 
 class CSVDataset(Dataset):
