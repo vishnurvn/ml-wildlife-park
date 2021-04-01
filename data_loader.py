@@ -28,7 +28,7 @@ class YoloDataset(Dataset):
         path = os.path.join(self.path, xml)
         etree = ElementTree.parse(path)
         root = etree.getroot()
-        tensor = torch.zeros((3, 5, GRID, GRID))
+        tensor = torch.zeros((GRID, GRID, 3, 5))
 
         img_path = root.find('path').text
         img = Image.open(img_path)
@@ -56,8 +56,8 @@ class YoloDataset(Dataset):
             y_pos = int(y_center // grid_size)
 
             for idx in range(3):
-                if tensor[idx, 0][y_pos][x_pos] == 0:
-                    tensor[idx, :, y_pos, x_pos] = torch.tensor([
+                if tensor[..., idx, 0][y_pos][x_pos] == 0:
+                    tensor[y_pos, x_pos, idx, :, ] = torch.tensor([
                         1, x_center_ratio, y_center_ratio,
                         width_ratio, height_ratio])
                     break
