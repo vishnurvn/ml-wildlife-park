@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader, random_split
 
 from object_detection.yolo import CSVDataset, ClassifierBackBone
 
+
 if torch.cuda.is_available():
     gpu = 1
 else:

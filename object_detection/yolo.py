@@ -9,7 +9,8 @@ from torch import nn as nn
 from torch.nn import functional as f
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms as t
-from torchmetrics import Accuracy, Precision, Recall, F1
+from torchmetrics import Accuracy, Precision, Recall
+
 
 LAMBDA_COORD = 5
 NO_OBJ = 0.5
@@ -18,6 +19,48 @@ transforms = t.Compose([
     t.ToTensor(),
     t.Normalize((1, 1, 1), (1, 1, 1))
 ])
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channel, out_channel):
+        super(ResidualBlock, self).__init__()
+        self.in_channel = in_channel
+        self.out_channel = out_channel
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channel, in_channel, (3, 3), padding=(1, 1)),
+            nn.BatchNorm2d(in_channel),
+            nn.ReLU(),
+            nn.Conv2d(in_channel, out_channel, (3, 3), padding=(1, 1)),
+            nn.BatchNorm2d(out_channel),
+            nn.ReLU()
+        )
+        self.conv1x1 = nn.Conv2d(in_channel, out_channel, (1, 1))
+        self.activation_layer = nn.ReLU()
+
+    def forward(self, x):
+        op = self.block(x)
+        if self.in_channel != self.out_channel:
+            return self.activation_layer(self.conv1x1(x) + op)
+        return self.activation_layer(op + x)
+
+
+class ResidualBottleneck(nn.Module):
+    def __init__(self, in_channel, stride):
+        super(ResidualBottleneck, self).__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channel, in_channel, (3, 3), padding=(1, 1), stride=stride),
+            nn.BatchNorm2d(in_channel),
+            nn.ReLU(),
+            nn.Conv2d(in_channel, in_channel, (3, 3), padding=(1, 1)),
+            nn.BatchNorm2d(in_channel),
+            nn.ReLU()
+        )
+        self.conv1x1 = nn.Conv2d(in_channel, in_channel, (1, 1), stride=stride)
+        self.activation_layer = nn.ReLU()
+
+    def forward(self, x):
+        op = self.block(x)
+        return self.activation_layer(self.conv1x1(x) + op)
 
 
 class SimpleYoloModel(nn.Module):
@@ -48,16 +91,19 @@ class ClassifierBackBone(pl.LightningModule):
     def __init__(self):
         super(ClassifierBackBone, self).__init__()
         self.back_bone = nn.Sequential(
-            nn.Conv2d(3, 8, (2, 2), stride=(1, 1)),
-            nn.MaxPool2d(3),
-            nn.Conv2d(8, 64, (2, 2), stride=(1, 1)),
-            nn.MaxPool2d(3),
-            nn.Conv2d(64, 128, (2, 2), stride=(1, 1)),
-            nn.MaxPool2d(3),
+            nn.Conv2d(3, 64, (7, 7), stride=(2, 2)),
+            ResidualBlock(64, 64),
+            ResidualBlock(64, 128),
+            ResidualBottleneck(128, 2),
+            ResidualBlock(128, 128),
+            ResidualBlock(128, 256),
+            ResidualBottleneck(256, 2),
+            ResidualBlock(256, 256),
+            ResidualBlock(256, 512),
+            ResidualBottleneck(512, 2),
+            ResidualBlock(512, 512),
             nn.Flatten(),
-            nn.Linear(25088, 64),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.Linear(512 * 25 * 25, 1)
         )
         self.criterion = torch.nn.BCELoss()
         self.metrics = {
@@ -80,8 +126,8 @@ class ClassifierBackBone(pl.LightningModule):
         inp, label = train_batch
         out = self.back_bone(inp)
         loss = self.criterion(out, label)
-        out = torch.round(out).to(int)
-        label = torch.round(label).to(int)
+        out = torch.round(out).to(int).to('cpu')
+        label = torch.round(label).to(int).to('cpu')
         self.metrics['train_accuracy'](out, label)
         self.metrics['train_precision'](out, label)
         self.metrics['train_recall'](out, label)
@@ -92,29 +138,29 @@ class ClassifierBackBone(pl.LightningModule):
         inp, label = val_batch
         out = self.back_bone(inp)
         loss = self.criterion(out, label)
-        out = torch.round(out).to(int)
-        label = torch.round(label).to(int)
+        out = torch.round(out).to(int).to('cpu')
+        label = torch.round(label).to(int).to('cpu')
         self.metrics['val_accuracy'](out, label)
         self.metrics['val_precision'](out, label)
         self.metrics['val_recall'](out, label)
-        self.log("val_loss", loss.item())
+        self.log("val_loss", loss.item(), prog_bar=True)
         return loss
 
-    def on_train_epoch_end(self, outputs):
-        acc = self.metrics['train_accuracy'].compute()
-        precision = self.metrics['train_precision'].compute()
-        recall = self.metrics['train_recall'].compute()
-        self.log("train_accuracy", acc)
-        self.log("train_precision", precision)
-        self.log("train_recall", recall)
-
-    def on_validation_epoch_end(self):
-        acc = self.metrics['val_accuracy'].compute()
-        precision = self.metrics['val_precision'].compute()
-        recall = self.metrics['val_recall'].compute()
-        self.log("val_accuracy", acc)
-        self.log("val_precision", precision)
-        self.log("val_recall", recall)
+    # def on_train_epoch_end(self, outputs):
+    #     acc = self.metrics['train_accuracy'].compute()
+    #     precision = self.metrics['train_precision'].compute()
+    #     recall = self.metrics['train_recall'].compute()
+    #     self.log("train_accuracy", acc, prog_bar=True)
+    #     self.log("train_precision", precision, prog_bar=True)
+    #     self.log("train_recall", recall, prog_bar=True)
+    #
+    # def on_validation_epoch_end(self):
+    #     acc = self.metrics['val_accuracy'].compute()
+    #     precision = self.metrics['val_precision'].compute()
+    #     recall = self.metrics['val_recall'].compute()
+    #     self.log("val_accuracy", acc, prog_bar=True)
+    #     self.log("val_precision", precision, prog_bar=True)
+    #     self.log("val_recall", recall, prog_bar=True)
 
 
 class CSVDataset(Dataset):
