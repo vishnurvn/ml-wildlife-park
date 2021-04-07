@@ -9,7 +9,8 @@ from torch import nn as nn
 from torch.nn import functional as f
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms as t
-from torchmetrics import Accuracy, Precision, Recall
+from torchmetrics import Accuracy, Precision, Recall, MetricCollection
+from torch.utils.tensorboard import SummaryWriter
 
 
 LAMBDA_COORD = 5
@@ -91,7 +92,10 @@ class ClassifierBackBone(pl.LightningModule):
     def __init__(self):
         super(ClassifierBackBone, self).__init__()
         self.back_bone = nn.Sequential(
-            nn.Conv2d(3, 64, (7, 7), stride=(2, 2)),
+            nn.Conv2d(3, 32, (7, 7), stride=(2, 2)),
+            ResidualBlock(32, 32),
+            ResidualBlock(32, 64),
+            ResidualBottleneck(64, 2),
             ResidualBlock(64, 64),
             ResidualBlock(64, 128),
             ResidualBottleneck(128, 2),
@@ -99,27 +103,27 @@ class ClassifierBackBone(pl.LightningModule):
             ResidualBlock(128, 256),
             ResidualBottleneck(256, 2),
             ResidualBlock(256, 256),
-            ResidualBlock(256, 512),
-            ResidualBottleneck(512, 2),
-            ResidualBlock(512, 512),
             nn.Flatten(),
-            nn.Linear(512 * 25 * 25, 1)
+            nn.Linear(256 * 25 * 25, 1),
+            nn.Sigmoid()
         )
         self.criterion = torch.nn.BCELoss()
-        self.metrics = {
-            'train_accuracy': Accuracy(),
-            'train_precision': Precision(),
-            'train_recall': Recall(),
-            'val_accuracy': Accuracy(),
-            'val_precision': Precision(),
-            'val_recall': Recall(),
-        }
+        self.train_metrics = MetricCollection({
+            'train_accuracy': Accuracy(compute_on_step=False),
+            'train_precision': Precision(compute_on_step=False),
+            'train_recall': Recall(compute_on_step=False),
+        })
+        self.val_metrics = MetricCollection({
+            'val_accuracy': Accuracy(compute_on_step=False),
+            'val_precision': Precision(compute_on_step=False),
+            'val_recall': Recall(compute_on_step=False)
+        })
 
     def forward(self, x):
         return self.back_bone(x)
 
     def configure_optimizers(self):
-        optimizer_func = torch.optim.Adagrad(self.parameters(), lr=1e-2)
+        optimizer_func = torch.optim.Adam(self.parameters(), lr=1e-2)
         return optimizer_func
 
     def training_step(self, train_batch, batch_idx):
@@ -127,10 +131,8 @@ class ClassifierBackBone(pl.LightningModule):
         out = self.back_bone(inp)
         loss = self.criterion(out, label)
         out = torch.round(out).to(int).to('cpu')
-        label = torch.round(label).to(int).to('cpu')
-        self.metrics['train_accuracy'](out, label)
-        self.metrics['train_precision'](out, label)
-        self.metrics['train_recall'](out, label)
+        label = label.to(int).to('cpu')
+        self.train_metrics(out, label)
         self.log("train_loss", loss.item())
         return loss
 
@@ -139,28 +141,18 @@ class ClassifierBackBone(pl.LightningModule):
         out = self.back_bone(inp)
         loss = self.criterion(out, label)
         out = torch.round(out).to(int).to('cpu')
-        label = torch.round(label).to(int).to('cpu')
-        self.metrics['val_accuracy'](out, label)
-        self.metrics['val_precision'](out, label)
-        self.metrics['val_recall'](out, label)
+        label = label.to(int).to('cpu')
+        self.val_metrics(out, label)
         self.log("val_loss", loss.item(), prog_bar=True)
         return loss
 
-    # def on_train_epoch_end(self, outputs):
-    #     acc = self.metrics['train_accuracy'].compute()
-    #     precision = self.metrics['train_precision'].compute()
-    #     recall = self.metrics['train_recall'].compute()
-    #     self.log("train_accuracy", acc, prog_bar=True)
-    #     self.log("train_precision", precision, prog_bar=True)
-    #     self.log("train_recall", recall, prog_bar=True)
-    #
-    # def on_validation_epoch_end(self):
-    #     acc = self.metrics['val_accuracy'].compute()
-    #     precision = self.metrics['val_precision'].compute()
-    #     recall = self.metrics['val_recall'].compute()
-    #     self.log("val_accuracy", acc, prog_bar=True)
-    #     self.log("val_precision", precision, prog_bar=True)
-    #     self.log("val_recall", recall, prog_bar=True)
+    def on_train_epoch_end(self, outputs):
+        metrics = self.train_metrics.compute()
+        self.logger.experiment.add_scalars('Train', metrics)
+
+    def on_validation_epoch_end(self):
+        metrics = self.val_metrics.compute()
+        self.logger.experiment.add_scalars('Validation', metrics)
 
 
 class CSVDataset(Dataset):
