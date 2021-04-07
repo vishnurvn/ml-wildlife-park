@@ -29,7 +29,7 @@ def main(csv_file, data_path):
     val_loader = DataLoader(val_set, batch_size=16)
     test_loader = DataLoader(test_set, batch_size=16)
 
-    model = ClassifierBackBone()
+    model = ClassifierBackBone().to(gpu)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
     criterion = torch.nn.BCELoss()
 
